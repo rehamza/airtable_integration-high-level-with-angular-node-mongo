@@ -1,0 +1,67 @@
+<mat-toolbar class="dashboard-toolbar">
+  <span>{{ clientAppConfig.appName }}</span>
+  <span class="spacer"></span>
+  <span class="toolbar-pill">Protected route</span>
+</mat-toolbar>
+
+<main class="dashboard-shell">
+  <section class="hero-copy">
+    <p class="eyebrow">OAuth Step Complete</p>
+    <h1>Protected dashboard shell</h1>
+    <p class="lede">
+      Route access is now gated by the Airtable integration status endpoint. When
+      the saved integration is not active, Angular redirects users back to the
+      public sign-in page.
+    </p>
+  </section>
+
+  <mat-card class="status-card" appearance="outlined">
+    <p class="eyebrow">Integration Status</p>
+    <h2>{{ authStatus().displayName }}</h2>
+
+    <div class="status-grid">
+      <article class="status-item">
+        <p class="status-label">Connection</p>
+        <p class="status-value">{{ authStatus().status }}</p>
+      </article>
+
+      <article class="status-item">
+        <p class="status-label">Connected</p>
+        <p class="status-value">{{ authStatus().isConnected ? 'Yes' : 'No' }}</p>
+      </article>
+
+      <article class="status-item">
+        <p class="status-label">Expires</p>
+        <p class="status-value">
+          {{ authStatus().expiresAt ? (authStatus().expiresAt | date: 'medium') : 'Not reported' }}
+        </p>
+      </article>
+
+      <article class="status-item">
+        <p class="status-label">Refresh token</p>
+        <p class="status-value">{{ authStatus().hasRefreshToken ? 'Stored' : 'Missing' }}</p>
+      </article>
+    </div>
+
+    <p class="status-note" *ngIf="authStatus().lastAuthError">
+      Last auth error: {{ authStatus().lastAuthError }}
+    </p>
+
+    <div class="actions">
+      <button mat-stroked-button type="button" (click)="refreshConnectionStatus()">
+        Refresh status
+      </button>
+      <button mat-stroked-button type="button" (click)="refreshAccessToken()">
+        Refresh token
+      </button>
+      <button mat-flat-button color="primary" type="button" (click)="reconnectAirtable()">
+        Reconnect Airtable
+      </button>
+    </div>
+
+    <div class="busy-row" *ngIf="isBusy()">
+      <mat-spinner diameter="22"></mat-spinner>
+      <span>Talking to the backend authentication endpoints...</span>
+    </div>
+  </mat-card>
+</main>

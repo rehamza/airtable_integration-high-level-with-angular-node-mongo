@@ -1,0 +1,69 @@
+<main class="signin-shell">
+  <section class="signin-copy">
+    <p class="eyebrow">Public Route</p>
+    <h1>{{ clientAppConfig.appName }}</h1>
+    <p class="lede">
+      This page stays public. The dashboard is protected until the Airtable OAuth
+      integration is active for the configured connection key.
+    </p>
+
+    <div class="notes-grid" aria-label="Authentication notes">
+      <article class="note-card">
+        <p class="note-label">Public pages</p>
+        <p class="note-value">`/signin`, `{{ clientAppConfig.authCallbackPath }}`</p>
+      </article>
+
+      <article class="note-card">
+        <p class="note-label">Protected page</p>
+        <p class="note-value">`{{ clientAppConfig.protectedHomePath }}`</p>
+      </article>
+
+      <article class="note-card">
+        <p class="note-label">API base</p>
+        <p class="note-value">{{ clientAppConfig.apiBaseUrl }}</p>
+      </article>
+
+      <article class="note-card">
+        <p class="note-label">Scopes</p>
+        <p class="note-value">{{ scopedPermissions() }}</p>
+      </article>
+    </div>
+  </section>
+
+  <mat-card class="signin-card" appearance="outlined">
+    <p class="eyebrow">Airtable OAuth</p>
+    <h2>Sign in with Airtable</h2>
+    <p class="card-copy">
+      The OAuth redirect is handled by the Nest backend so the PKCE verifier and
+      token exchange stay server-side.
+    </p>
+
+    <div class="status-panel">
+      <p class="status-label">Current integration status</p>
+      <p class="status-value">{{ status().status }}</p>
+      <p class="status-meta" *ngIf="status().connectedAt">
+        Connected at {{ status().connectedAt | date: 'medium' }}
+      </p>
+      <p class="status-meta" *ngIf="status().lastAuthError">
+        Last auth error: {{ status().lastAuthError }}
+      </p>
+      <p class="status-meta error" *ngIf="notice()">{{ notice() }}</p>
+    </div>
+
+    <button
+      mat-flat-button
+      color="primary"
+      class="sign-in-button"
+      type="button"
+      (click)="connectWithAirtable()"
+      [disabled]="isBusy()"
+    >
+      Sign in with Airtable
+    </button>
+
+    <div class="spinner-row" *ngIf="isBusy()">
+      <mat-spinner diameter="22"></mat-spinner>
+      <span>Checking integration status...</span>
+    </div>
+  </mat-card>
+</main>

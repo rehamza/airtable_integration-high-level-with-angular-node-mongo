@@ -1,0 +1,22 @@
+<main class="callback-shell">
+  <mat-card class="callback-card" appearance="outlined">
+    <p class="eyebrow">Public Callback Route</p>
+    <h1>{{ viewState().title }}</h1>
+    <p class="body-copy">{{ viewState().message }}</p>
+
+    <div class="spinner-row" *ngIf="viewState().loading">
+      <mat-spinner diameter="28"></mat-spinner>
+      <span>Checking Airtable connection state...</span>
+    </div>
+
+    <button
+      *ngIf="viewState().error"
+      mat-flat-button
+      color="primary"
+      type="button"
+      (click)="returnToSignIn()"
+    >
+      Return to sign-in
+    </button>
+  </mat-card>
+</main>

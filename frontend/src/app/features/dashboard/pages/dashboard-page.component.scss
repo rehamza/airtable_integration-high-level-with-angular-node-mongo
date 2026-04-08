@@ -1,0 +1,132 @@
+:host {
+  display: block;
+  min-height: 100vh;
+}
+
+.dashboard-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: rgba(11, 21, 39, 0.92);
+  color: #f4f7fb;
+  backdrop-filter: blur(18px);
+  box-shadow: 0 12px 32px rgba(9, 17, 30, 0.12);
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+.toolbar-pill {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.82rem;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.dashboard-shell {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 2rem 1.25rem 3rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 480px);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.eyebrow {
+  margin: 0 0 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #5d6f89;
+}
+
+.hero-copy h1,
+.status-card h2 {
+  margin: 0;
+  color: #12233d;
+}
+
+.hero-copy h1 {
+  font-size: clamp(2.4rem, 6vw, 4rem);
+  line-height: 0.95;
+}
+
+.lede,
+.status-note {
+  margin: 1rem 0 0;
+  color: #44556f;
+  line-height: 1.7;
+}
+
+.status-card {
+  border-radius: 28px;
+  border: 1px solid rgba(18, 31, 56, 0.08);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 24px 60px rgba(18, 31, 56, 0.12);
+  padding: 0.4rem;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+  margin-top: 1.5rem;
+}
+
+.status-item {
+  padding: 1rem;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(247, 249, 252, 0.98), rgba(235, 240, 247, 0.92));
+  border: 1px solid rgba(18, 31, 56, 0.08);
+}
+
+.status-label {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #6f8199;
+}
+
+.status-value {
+  margin: 0;
+  font-weight: 600;
+  color: #12233d;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
+.actions button {
+  border-radius: 14px;
+  min-height: 44px;
+}
+
+.busy-row {
+  margin-top: 1rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: #44556f;
+}
+
+@media (max-width: 960px) {
+  .dashboard-shell {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .status-grid {
+    grid-template-columns: 1fr;
+  }
+}
