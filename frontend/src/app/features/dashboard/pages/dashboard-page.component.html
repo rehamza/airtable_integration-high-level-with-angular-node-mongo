@@ -1,123 +1,214 @@
 <mat-toolbar class="dashboard-toolbar">
-  <span>{{ clientAppConfig.appName }}</span>
-  <span class="spacer"></span>
-  <span class="toolbar-pill">Protected route</span>
+  <div class="toolbar-left">
+    <span class="app-title">{{ clientAppConfig.appName }}</span>
+    <span class="toolbar-pill">{{ authStatus().displayName }}</span>
+  </div>
+
+  <div class="toolbar-center">
+    <button mat-stroked-button type="button" (click)="createNewGrid()">
+      New Grid
+    </button>
+    <button mat-flat-button color="primary" type="button" (click)="createGlobalSearchGrid()">
+      New Global Search Grid
+    </button>
+  </div>
+
+  <div class="toolbar-right">
+    <span class="raw-data-label">Raw Data Logs</span>
+    <button mat-flat-button color="warn" type="button" (click)="deleteGrid()">
+      Delete Grid
+    </button>
+  </div>
 </mat-toolbar>
 
 <main class="dashboard-shell">
-  <section class="hero-copy">
-    <p class="eyebrow">OAuth Step Complete</p>
-    <h1>Protected dashboard shell</h1>
-    <p class="lede">
-      Route access is now gated by the Airtable integration status endpoint. When
-      the saved integration is not active, Angular redirects users back to the
-      public sign-in page.
-    </p>
+  <section class="dashboard-intro">
+    <div>
+      <p class="eyebrow">Enterprise Data Dashboard</p>
+      <h1>Synced Airtable workspace explorer</h1>
+      <p class="lede">
+        Browse synced bases, tables, pages, users, and revision history with backend-driven
+        filtering, sorting, pagination, and dynamic columns.
+      </p>
+    </div>
+
+    <div class="summary-strip">
+      <article class="summary-card">
+        <span class="summary-label">Connection</span>
+        <strong>{{ authStatus().isConnected ? 'Connected' : 'Disconnected' }}</strong>
+      </article>
+      <article class="summary-card">
+        <span class="summary-label">Grid Mode</span>
+        <strong>{{ gridMode() === 'global' ? 'Global Search' : 'Standard' }}</strong>
+      </article>
+      <article class="summary-card">
+        <span class="summary-label">Session Cookies</span>
+        <strong>{{ authStatus().hasSessionCookies ? 'Stored' : 'Missing' }}</strong>
+      </article>
+      <article class="summary-card">
+        <span class="summary-label">Last Sync</span>
+        <strong>{{ authStatus().lastSyncedAt ? (authStatus().lastSyncedAt | date: 'mediumDate') : 'Never' }}</strong>
+      </article>
+    </div>
   </section>
 
-  <section class="side-column">
-    <mat-card class="status-card" appearance="outlined">
-      <p class="eyebrow">Integration Status</p>
-      <h2>{{ authStatus().displayName }}</h2>
+  <mat-card class="control-panel" appearance="outlined">
+    <div class="control-toolbar">
+      <mat-form-field appearance="outline">
+        <mat-label>Active Integrations</mat-label>
+        <mat-select [(ngModel)]="filters.baseId" (selectionChange)="handleBaseSelectionChange()">
+          <mat-option value="">All Bases</mat-option>
+          <mat-option
+            *ngFor="let option of activeIntegrationOptions()"
+            [value]="option.value"
+          >
+            {{ option.label }}
+            <span class="option-secondary" *ngIf="option.secondaryLabel"> · {{ option.secondaryLabel }}</span>
+          </mat-option>
+        </mat-select>
+      </mat-form-field>
 
-      <div class="status-grid">
-        <article class="status-item">
-          <p class="status-label">Connection</p>
-          <p class="status-value">{{ authStatus().status }}</p>
-        </article>
+      <mat-form-field appearance="outline">
+        <mat-label>Entity</mat-label>
+        <mat-select [(ngModel)]="filters.entity" (selectionChange)="handleEntitySelectionChange()">
+          <mat-option
+            *ngFor="let option of entityOptions()"
+            [value]="option.value"
+          >
+            {{ option.label }}
+          </mat-option>
+        </mat-select>
+      </mat-form-field>
 
-        <article class="status-item">
-          <p class="status-label">Connected</p>
-          <p class="status-value">{{ authStatus().isConnected ? 'Yes' : 'No' }}</p>
-        </article>
+      <mat-form-field appearance="outline">
+        <mat-label>Processed Entity</mat-label>
+        <mat-select
+          [(ngModel)]="filters.processedEntity"
+          (selectionChange)="handleProcessedEntityChange()"
+          [disabled]="processedEntityOptions().length === 0"
+        >
+          <mat-option value="">All Tables</mat-option>
+          <mat-option
+            *ngFor="let option of processedEntityOptions()"
+            [value]="option.value"
+          >
+            {{ option.label }}
+          </mat-option>
+        </mat-select>
+      </mat-form-field>
 
-        <article class="status-item">
-          <p class="status-label">Expires</p>
-          <p class="status-value">
-            {{ authStatus().expiresAt ? (authStatus().expiresAt | date: 'medium') : 'Not reported' }}
-          </p>
-        </article>
+      <mat-form-field appearance="outline" class="search-field">
+        <mat-label>Search</mat-label>
+        <mat-icon matPrefix>search</mat-icon>
+        <input
+          matInput
+          type="text"
+          placeholder="Search..."
+          [(ngModel)]="filters.search"
+          (input)="handleSearchInput()"
+        />
+      </mat-form-field>
+    </div>
 
-        <article class="status-item">
-          <p class="status-label">Refresh token</p>
-          <p class="status-value">{{ authStatus().hasRefreshToken ? 'Stored' : 'Missing' }}</p>
-        </article>
+    <div class="status-row">
+      <span class="status-chip">Status: {{ authStatus().status }}</span>
+      <span class="status-chip">Rows: {{ footer().total }}</span>
+      <span class="status-chip" *ngIf="gridError()">{{ gridError() }}</span>
+      <span class="status-chip success" *ngIf="syncMessage()">{{ syncMessage() }}</span>
+      <span class="status-chip info" *ngIf="scraperMessage()">{{ scraperMessage() }}</span>
+    </div>
+  </mat-card>
 
-        <article class="status-item">
-          <p class="status-label">Session cookies</p>
-          <p class="status-value">{{ authStatus().hasSessionCookies ? 'Stored' : 'Missing' }}</p>
-        </article>
-
-        <article class="status-item">
-          <p class="status-label">Cookie expiry</p>
-          <p class="status-value">
-            {{ authStatus().cookieExpiresAt ? (authStatus().cookieExpiresAt | date: 'medium') : 'Unknown' }}
-          </p>
-        </article>
-
-        <article class="status-item">
-          <p class="status-label">Last sync status</p>
-          <p class="status-value">{{ authStatus().lastSyncStatus }}</p>
-        </article>
-
-        <article class="status-item">
-          <p class="status-label">Last synced</p>
-          <p class="status-value">
-            {{ authStatus().lastSyncedAt ? (authStatus().lastSyncedAt | date: 'medium') : 'Never' }}
-          </p>
-        </article>
+  <section class="workspace-grid">
+    <div class="grid-topbar">
+      <div class="grid-topbar-left">
+        <h2>{{ filters.entity }}</h2>
+        <p>
+          {{ footer().from }} to {{ footer().to }} of {{ footer().total }}
+          <span *ngIf="filters.processedEntity"> · table filtered</span>
+        </p>
       </div>
 
-      <p class="status-note" *ngIf="authStatus().lastAuthError">
-        Last auth error: {{ authStatus().lastAuthError }}
-      </p>
-      <p class="status-note" *ngIf="authStatus().lastSyncError">
-        Last sync error: {{ authStatus().lastSyncError }}
-      </p>
-      <p class="status-note" *ngIf="syncMessage()">
-        {{ syncMessage() }}
-      </p>
-
-      <div class="actions">
+      <div class="grid-topbar-actions">
         <button mat-stroked-button type="button" (click)="refreshConnectionStatus()">
-          Refresh status
+          Refresh
         </button>
-        <button mat-stroked-button type="button" (click)="refreshAccessToken()">
-          Refresh token
+        <button mat-stroked-button type="button" (click)="runFullSync()" [disabled]="syncRunning()">
+          Sync
         </button>
-        <button mat-flat-button color="primary" type="button" (click)="reconnectAirtable()">
-          Reconnect Airtable
+        <button mat-stroked-button type="button" (click)="exportCsv()">
+          Export CSV
+        </button>
+      </div>
+    </div>
+
+    <div class="grid-shell ag-theme-quartz">
+      <div class="grid-overlay" *ngIf="gridLoading()">
+        <mat-spinner diameter="34"></mat-spinner>
+        <span>Loading grid data...</span>
+      </div>
+
+      <ag-grid-angular
+        class="data-grid"
+        [modules]="agGridModules"
+        [columnDefs]="columnDefs()"
+        [rowData]="rowData()"
+        [defaultColDef]="defaultColDef"
+        [rowSelection]="rowSelection"
+        [selectionColumnDef]="selectionColumnDef"
+        [pagination]="true"
+        [paginationPageSize]="filters.pageSize"
+        [suppressPaginationPanel]="true"
+        [animateRows]="true"
+        [overlayNoRowsTemplate]="'<span class=&quot;ag-overlay-no-rows-center&quot;>No data available</span>'"
+        [overlayLoadingTemplate]="'<span class=&quot;ag-overlay-loading-center&quot;>Loading data...</span>'"
+        [getRowId]="getRowId"
+        (gridReady)="onGridReady($event)"
+        (firstDataRendered)="onFirstDataRendered($event)"
+        (selectionChanged)="onSelectionChanged($event)"
+        (filterChanged)="onFilterChanged($event)"
+        (sortChanged)="onSortChanged($event)"
+      ></ag-grid-angular>
+    </div>
+
+    <footer class="grid-footer">
+      <div class="footer-meta">
+        <span>Rows Selected: {{ selectedRowsCount() }}</span>
+        <span>Page Size:</span>
+        <mat-form-field appearance="outline" class="page-size-field">
+          <mat-select [(ngModel)]="filters.pageSize" (selectionChange)="handlePageSizeChange()">
+            <mat-option [value]="25">25</mat-option>
+            <mat-option [value]="50">50</mat-option>
+            <mat-option [value]="100">100</mat-option>
+            <mat-option [value]="200">200</mat-option>
+          </mat-select>
+        </mat-form-field>
+        <span>{{ footer().from }} to {{ footer().to }} of {{ footer().total }}</span>
+        <span>Page {{ footer().currentPage }} of {{ footer().totalPages }}</span>
+      </div>
+
+      <div class="footer-actions">
+        <button mat-stroked-button type="button" (click)="goToPreviousPage()" [disabled]="footer().currentPage <= 1">
+          Previous
         </button>
         <button
           mat-flat-button
-          color="accent"
+          color="primary"
           type="button"
-          (click)="runFullSync()"
-          [disabled]="syncRunning()"
+          (click)="goToNextPage()"
+          [disabled]="footer().currentPage >= footer().totalPages"
         >
-          Run full sync
+          Next
         </button>
       </div>
+    </footer>
+  </section>
 
-      <div class="busy-row" *ngIf="isBusy()">
-        <mat-spinner diameter="22"></mat-spinner>
-        <span>Talking to the backend authentication endpoints...</span>
-      </div>
-      <div class="busy-row" *ngIf="syncRunning()">
-        <mat-spinner diameter="22"></mat-spinner>
-        <span>Syncing bases, tables, records, and discovered users...</span>
-      </div>
-    </mat-card>
-
-    <mat-card class="status-card scraper-card" appearance="outlined">
-      <p class="eyebrow">Revision Scraper</p>
-      <h2>Browser session and MFA</h2>
-      <p class="lede compact">
-        Provide Airtable login details only when you need to refresh cookies or satisfy MFA.
-        If backend env credentials are configured, these fields can be left empty.
-      </p>
-
-      <div class="scraper-form">
+  <section class="ops-panel">
+    <mat-card class="ops-card" appearance="outlined">
+      <p class="eyebrow">Automation</p>
+      <h3>Revision-history session</h3>
+      <div class="ops-grid">
         <mat-form-field appearance="outline">
           <mat-label>Session Email</mat-label>
           <input matInput type="email" [(ngModel)]="scraperForm.email" />
@@ -140,34 +231,35 @@
       </div>
 
       <mat-slide-toggle [(ngModel)]="scraperForm.forceRelogin">
-        Force fresh Airtable login before scraping
+        Force fresh Airtable login before revision scraping
       </mat-slide-toggle>
 
-      <p class="status-note" *ngIf="scraperMessage()">
-        {{ scraperMessage() }}
-      </p>
-
-      <div class="actions">
-        <button mat-stroked-button type="button" (click)="validateRevisionSession()" [disabled]="scraperBusy()">
-          Validate cookies
+      <div class="actions ops-actions">
+        <button mat-stroked-button type="button" (click)="refreshAccessToken()">
+          Refresh token
         </button>
         <button mat-stroked-button type="button" (click)="loginRevisionSession()" [disabled]="scraperBusy()">
           Refresh cookies
         </button>
-        <button
-          mat-flat-button
-          color="primary"
-          type="button"
-          (click)="scrapeRevisionHistory()"
-          [disabled]="scraperBusy()"
-        >
+        <button mat-stroked-button type="button" (click)="validateRevisionSession()" [disabled]="scraperBusy()">
+          Validate cookies
+        </button>
+        <button mat-flat-button color="primary" type="button" (click)="scrapeRevisionHistory()" [disabled]="scraperBusy()">
           Scrape revision history
         </button>
       </div>
 
-      <div class="busy-row" *ngIf="scraperBusy()">
-        <mat-spinner diameter="22"></mat-spinner>
-        <span>Refreshing Airtable cookies, validating the session, or scraping revision history...</span>
+      <div class="busy-row" *ngIf="scraperBusy() || isBusy() || syncRunning()">
+        <mat-spinner diameter="20"></mat-spinner>
+        <span>
+          {{
+            scraperBusy()
+              ? 'Refreshing Airtable cookies or scraping revision history...'
+              : syncRunning()
+                ? 'Synchronizing Airtable data...'
+                : 'Refreshing integration state...'
+          }}
+        </span>
       </div>
     </mat-card>
   </section>
