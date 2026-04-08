@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { IntegrationsModule } from '../integrations/integrations.module';
+import { AirtableDataController } from './controllers/airtable-data.controller';
 import { AirtableIntegrationsController } from './controllers/airtable-integrations.controller';
 import { AirtableBase, AirtableBaseSchema } from './schemas/airtable-base.schema';
 import { AirtablePage, AirtablePageSchema } from './schemas/airtable-page.schema';
@@ -12,6 +13,7 @@ import { AirtableTable, AirtableTableSchema } from './schemas/airtable-table.sch
 import { AirtableUser, AirtableUserSchema } from './schemas/airtable-user.schema';
 import { ScrapeJob, ScrapeJobSchema } from './schemas/scrape-job.schema';
 import { AirtableApiService } from './services/airtable-api.service';
+import { AirtableDataService } from './services/airtable-data.service';
 import { AirtableOAuthService } from './services/airtable-oauth.service';
 import { AirtableRevisionParserService } from './services/airtable-revision-parser.service';
 import { AirtableScraperService } from './services/airtable-scraper.service';
@@ -47,10 +49,11 @@ import { AirtableSyncService } from './services/airtable-sync.service';
       },
     ]),
   ],
-  controllers: [AirtableIntegrationsController],
+  controllers: [AirtableIntegrationsController, AirtableDataController],
   providers: [
     AirtableOAuthService,
     AirtableApiService,
+    AirtableDataService,
     AirtableSyncService,
     AirtableRevisionParserService,
     AirtableScraperService,
@@ -59,6 +62,7 @@ import { AirtableSyncService } from './services/airtable-sync.service';
     MongooseModule,
     AirtableOAuthService,
     AirtableApiService,
+    AirtableDataService,
     AirtableSyncService,
     AirtableRevisionParserService,
     AirtableScraperService,
