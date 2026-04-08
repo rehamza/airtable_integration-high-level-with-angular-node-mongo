@@ -132,6 +132,57 @@ export class IntegrationsService {
     return integration.save();
   }
 
+  async markSyncStarted(integration: IntegrationDocument): Promise<IntegrationDocument> {
+    integration.lastSyncStatus = 'running';
+    integration.lastSyncError = undefined;
+    integration.metadata = {
+      ...(integration.metadata ?? {}),
+      lastSyncStartedAt: new Date().toISOString(),
+    };
+
+    return integration.save();
+  }
+
+  async markSyncCompleted(
+    integration: IntegrationDocument,
+    summary: Record<string, unknown>,
+  ): Promise<IntegrationDocument> {
+    integration.lastSyncStatus = 'success';
+    integration.lastSyncedAt = new Date();
+    integration.lastSyncError = undefined;
+    integration.metadata = {
+      ...(integration.metadata ?? {}),
+      lastSyncStartedAt: summary.startedAt,
+      lastSyncSummary: summary,
+    };
+
+    return integration.save();
+  }
+
+  async markSyncFailed(
+    integration: IntegrationDocument,
+    errorMessage: string,
+  ): Promise<IntegrationDocument> {
+    const metadata = integration.metadata ?? {};
+    const previousSummary =
+      typeof metadata.lastSyncSummary === 'object' && metadata.lastSyncSummary !== null
+        ? (metadata.lastSyncSummary as Record<string, unknown>)
+        : {};
+
+    integration.lastSyncStatus = 'failed';
+    integration.lastSyncError = errorMessage;
+    integration.metadata = {
+      ...metadata,
+      lastSyncSummary: {
+        ...previousSummary,
+        failedAt: new Date().toISOString(),
+        errorMessage,
+      },
+    };
+
+    return integration.save();
+  }
+
   toPublicStatus(
     integration: IntegrationDocument | null,
     provider: 'airtable',
@@ -157,6 +208,10 @@ export class IntegrationsService {
       connectedAt: integration?.connectedAt ?? null,
       lastRefreshedAt: integration?.oauth?.lastRefreshedAt ?? null,
       lastAuthError: integration?.lastAuthError ?? null,
+      lastSyncedAt: integration?.lastSyncedAt ?? null,
+      lastSyncStatus: integration?.lastSyncStatus ?? 'idle',
+      lastSyncError: integration?.lastSyncError ?? null,
+      lastSyncSummary: integration?.metadata?.lastSyncSummary ?? null,
       hasRefreshToken: Boolean(integration?.oauth?.refreshToken),
       accessTokenExpired: expiresAt ? expiresAt.getTime() <= Date.now() : false,
     };

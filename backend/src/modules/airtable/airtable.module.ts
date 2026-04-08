@@ -11,7 +11,9 @@ import {
 import { AirtableTable, AirtableTableSchema } from './schemas/airtable-table.schema';
 import { AirtableUser, AirtableUserSchema } from './schemas/airtable-user.schema';
 import { ScrapeJob, ScrapeJobSchema } from './schemas/scrape-job.schema';
+import { AirtableApiService } from './services/airtable-api.service';
 import { AirtableOAuthService } from './services/airtable-oauth.service';
+import { AirtableSyncService } from './services/airtable-sync.service';
 
 @Module({
   imports: [
@@ -44,7 +46,7 @@ import { AirtableOAuthService } from './services/airtable-oauth.service';
     ]),
   ],
   controllers: [AirtableIntegrationsController],
-  providers: [AirtableOAuthService],
-  exports: [MongooseModule, AirtableOAuthService],
+  providers: [AirtableOAuthService, AirtableApiService, AirtableSyncService],
+  exports: [MongooseModule, AirtableOAuthService, AirtableApiService, AirtableSyncService],
 })
 export class AirtableModule {}

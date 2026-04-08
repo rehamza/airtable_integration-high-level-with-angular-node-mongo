@@ -3,11 +3,16 @@ import type { Response } from 'express';
 import { AirtableIntegrationQueryDto } from '../dto/airtable-integration-query.dto';
 import { AirtableOAuthCallbackDto } from '../dto/airtable-oauth-callback.dto';
 import { AirtableRefreshDto } from '../dto/airtable-refresh.dto';
+import { AirtableSyncDto } from '../dto/airtable-sync.dto';
 import { AirtableOAuthService } from '../services/airtable-oauth.service';
+import { AirtableSyncService } from '../services/airtable-sync.service';
 
 @Controller('integrations/airtable')
 export class AirtableIntegrationsController {
-  constructor(private readonly airtableOAuthService: AirtableOAuthService) {}
+  constructor(
+    private readonly airtableOAuthService: AirtableOAuthService,
+    private readonly airtableSyncService: AirtableSyncService,
+  ) {}
 
   @Get('status')
   getStatus(@Query() query: AirtableIntegrationQueryDto) {
@@ -39,5 +44,10 @@ export class AirtableIntegrationsController {
   @Post('refresh')
   refresh(@Body() body: AirtableRefreshDto) {
     return this.airtableOAuthService.refreshAccessToken(body.integrationKey);
+  }
+
+  @Post('sync')
+  sync(@Body() body: AirtableSyncDto) {
+    return this.airtableSyncService.runFullSync(body);
   }
 }

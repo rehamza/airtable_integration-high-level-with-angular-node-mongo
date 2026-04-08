@@ -41,10 +41,28 @@
         <p class="status-label">Refresh token</p>
         <p class="status-value">{{ authStatus().hasRefreshToken ? 'Stored' : 'Missing' }}</p>
       </article>
+
+      <article class="status-item">
+        <p class="status-label">Last sync status</p>
+        <p class="status-value">{{ authStatus().lastSyncStatus }}</p>
+      </article>
+
+      <article class="status-item">
+        <p class="status-label">Last synced</p>
+        <p class="status-value">
+          {{ authStatus().lastSyncedAt ? (authStatus().lastSyncedAt | date: 'medium') : 'Never' }}
+        </p>
+      </article>
     </div>
 
     <p class="status-note" *ngIf="authStatus().lastAuthError">
       Last auth error: {{ authStatus().lastAuthError }}
+    </p>
+    <p class="status-note" *ngIf="authStatus().lastSyncError">
+      Last sync error: {{ authStatus().lastSyncError }}
+    </p>
+    <p class="status-note" *ngIf="syncMessage()">
+      {{ syncMessage() }}
     </p>
 
     <div class="actions">
@@ -57,11 +75,24 @@
       <button mat-flat-button color="primary" type="button" (click)="reconnectAirtable()">
         Reconnect Airtable
       </button>
+      <button
+        mat-flat-button
+        color="accent"
+        type="button"
+        (click)="runFullSync()"
+        [disabled]="syncRunning()"
+      >
+        Run full sync
+      </button>
     </div>
 
     <div class="busy-row" *ngIf="isBusy()">
       <mat-spinner diameter="22"></mat-spinner>
       <span>Talking to the backend authentication endpoints...</span>
+    </div>
+    <div class="busy-row" *ngIf="syncRunning()">
+      <mat-spinner diameter="22"></mat-spinner>
+      <span>Syncing bases, tables, records, and discovered users...</span>
     </div>
   </mat-card>
 </main>
