@@ -16,6 +16,8 @@ export interface IntegrationAuthStatus {
   lastSyncError: string | null;
   lastSyncSummary: Record<string, unknown> | null;
   hasRefreshToken: boolean;
+  hasSessionCookies: boolean;
+  cookieExpiresAt: string | null;
   accessTokenExpired: boolean;
   checked?: boolean;
   errorMessage?: string | null;

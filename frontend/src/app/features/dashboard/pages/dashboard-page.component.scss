@@ -35,6 +35,11 @@
   align-items: start;
 }
 
+.side-column {
+  display: grid;
+  gap: 1.25rem;
+}
+
 .eyebrow {
   margin: 0 0 0.8rem;
   text-transform: uppercase;
@@ -60,6 +65,10 @@
   margin: 1rem 0 0;
   color: #44556f;
   line-height: 1.7;
+}
+
+.compact {
+  margin-top: 0.8rem;
 }
 
 .status-card {
@@ -111,6 +120,21 @@
   min-height: 44px;
 }
 
+.scraper-card {
+  padding-bottom: 1.2rem;
+}
+
+.scraper-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+  margin-top: 1.25rem;
+}
+
+.scraper-form mat-form-field {
+  width: 100%;
+}
+
 .busy-row {
   margin-top: 1rem;
   display: inline-flex;
@@ -127,6 +151,10 @@
 
 @media (max-width: 640px) {
   .status-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .scraper-form {
     grid-template-columns: 1fr;
   }
 }

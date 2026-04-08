@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import {
+  BrowserCookie,
   Integration,
   IntegrationDocument,
   IntegrationOAuthState,
@@ -23,6 +24,11 @@ interface StoreOAuthTokenSetInput {
   tokenType?: string;
   scope?: string;
   expiresIn?: number;
+}
+
+interface StoreSessionCookiesInput {
+  cookies: BrowserCookie[];
+  expiresAt?: Date;
 }
 
 @Injectable()
@@ -132,6 +138,23 @@ export class IntegrationsService {
     return integration.save();
   }
 
+  async storeSessionCookies(
+    integration: IntegrationDocument,
+    input: StoreSessionCookiesInput,
+  ): Promise<IntegrationDocument> {
+    integration.sessionCookies = input.cookies;
+    integration.cookieExpiresAt = input.expiresAt;
+
+    return integration.save();
+  }
+
+  async clearSessionCookies(integration: IntegrationDocument): Promise<IntegrationDocument> {
+    integration.sessionCookies = [];
+    integration.cookieExpiresAt = undefined;
+
+    return integration.save();
+  }
+
   async markSyncStarted(integration: IntegrationDocument): Promise<IntegrationDocument> {
     integration.lastSyncStatus = 'running';
     integration.lastSyncError = undefined;
@@ -213,6 +236,8 @@ export class IntegrationsService {
       lastSyncError: integration?.lastSyncError ?? null,
       lastSyncSummary: integration?.metadata?.lastSyncSummary ?? null,
       hasRefreshToken: Boolean(integration?.oauth?.refreshToken),
+      hasSessionCookies: Boolean(integration?.sessionCookies?.length),
+      cookieExpiresAt: integration?.cookieExpiresAt ?? null,
       accessTokenExpired: expiresAt ? expiresAt.getTime() <= Date.now() : false,
     };
   }

@@ -22,6 +22,8 @@ const DEFAULT_STATUS: IntegrationAuthStatus = {
   lastSyncError: null,
   lastSyncSummary: null,
   hasRefreshToken: false,
+  hasSessionCookies: false,
+  cookieExpiresAt: null,
   accessTokenExpired: false,
   checked: false,
   errorMessage: null,

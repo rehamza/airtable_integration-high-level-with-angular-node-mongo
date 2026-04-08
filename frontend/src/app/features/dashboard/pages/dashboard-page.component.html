@@ -15,84 +15,160 @@
     </p>
   </section>
 
-  <mat-card class="status-card" appearance="outlined">
-    <p class="eyebrow">Integration Status</p>
-    <h2>{{ authStatus().displayName }}</h2>
+  <section class="side-column">
+    <mat-card class="status-card" appearance="outlined">
+      <p class="eyebrow">Integration Status</p>
+      <h2>{{ authStatus().displayName }}</h2>
 
-    <div class="status-grid">
-      <article class="status-item">
-        <p class="status-label">Connection</p>
-        <p class="status-value">{{ authStatus().status }}</p>
-      </article>
+      <div class="status-grid">
+        <article class="status-item">
+          <p class="status-label">Connection</p>
+          <p class="status-value">{{ authStatus().status }}</p>
+        </article>
 
-      <article class="status-item">
-        <p class="status-label">Connected</p>
-        <p class="status-value">{{ authStatus().isConnected ? 'Yes' : 'No' }}</p>
-      </article>
+        <article class="status-item">
+          <p class="status-label">Connected</p>
+          <p class="status-value">{{ authStatus().isConnected ? 'Yes' : 'No' }}</p>
+        </article>
 
-      <article class="status-item">
-        <p class="status-label">Expires</p>
-        <p class="status-value">
-          {{ authStatus().expiresAt ? (authStatus().expiresAt | date: 'medium') : 'Not reported' }}
-        </p>
-      </article>
+        <article class="status-item">
+          <p class="status-label">Expires</p>
+          <p class="status-value">
+            {{ authStatus().expiresAt ? (authStatus().expiresAt | date: 'medium') : 'Not reported' }}
+          </p>
+        </article>
 
-      <article class="status-item">
-        <p class="status-label">Refresh token</p>
-        <p class="status-value">{{ authStatus().hasRefreshToken ? 'Stored' : 'Missing' }}</p>
-      </article>
+        <article class="status-item">
+          <p class="status-label">Refresh token</p>
+          <p class="status-value">{{ authStatus().hasRefreshToken ? 'Stored' : 'Missing' }}</p>
+        </article>
 
-      <article class="status-item">
-        <p class="status-label">Last sync status</p>
-        <p class="status-value">{{ authStatus().lastSyncStatus }}</p>
-      </article>
+        <article class="status-item">
+          <p class="status-label">Session cookies</p>
+          <p class="status-value">{{ authStatus().hasSessionCookies ? 'Stored' : 'Missing' }}</p>
+        </article>
 
-      <article class="status-item">
-        <p class="status-label">Last synced</p>
-        <p class="status-value">
-          {{ authStatus().lastSyncedAt ? (authStatus().lastSyncedAt | date: 'medium') : 'Never' }}
-        </p>
-      </article>
-    </div>
+        <article class="status-item">
+          <p class="status-label">Cookie expiry</p>
+          <p class="status-value">
+            {{ authStatus().cookieExpiresAt ? (authStatus().cookieExpiresAt | date: 'medium') : 'Unknown' }}
+          </p>
+        </article>
 
-    <p class="status-note" *ngIf="authStatus().lastAuthError">
-      Last auth error: {{ authStatus().lastAuthError }}
-    </p>
-    <p class="status-note" *ngIf="authStatus().lastSyncError">
-      Last sync error: {{ authStatus().lastSyncError }}
-    </p>
-    <p class="status-note" *ngIf="syncMessage()">
-      {{ syncMessage() }}
-    </p>
+        <article class="status-item">
+          <p class="status-label">Last sync status</p>
+          <p class="status-value">{{ authStatus().lastSyncStatus }}</p>
+        </article>
 
-    <div class="actions">
-      <button mat-stroked-button type="button" (click)="refreshConnectionStatus()">
-        Refresh status
-      </button>
-      <button mat-stroked-button type="button" (click)="refreshAccessToken()">
-        Refresh token
-      </button>
-      <button mat-flat-button color="primary" type="button" (click)="reconnectAirtable()">
-        Reconnect Airtable
-      </button>
-      <button
-        mat-flat-button
-        color="accent"
-        type="button"
-        (click)="runFullSync()"
-        [disabled]="syncRunning()"
-      >
-        Run full sync
-      </button>
-    </div>
+        <article class="status-item">
+          <p class="status-label">Last synced</p>
+          <p class="status-value">
+            {{ authStatus().lastSyncedAt ? (authStatus().lastSyncedAt | date: 'medium') : 'Never' }}
+          </p>
+        </article>
+      </div>
 
-    <div class="busy-row" *ngIf="isBusy()">
-      <mat-spinner diameter="22"></mat-spinner>
-      <span>Talking to the backend authentication endpoints...</span>
-    </div>
-    <div class="busy-row" *ngIf="syncRunning()">
-      <mat-spinner diameter="22"></mat-spinner>
-      <span>Syncing bases, tables, records, and discovered users...</span>
-    </div>
-  </mat-card>
+      <p class="status-note" *ngIf="authStatus().lastAuthError">
+        Last auth error: {{ authStatus().lastAuthError }}
+      </p>
+      <p class="status-note" *ngIf="authStatus().lastSyncError">
+        Last sync error: {{ authStatus().lastSyncError }}
+      </p>
+      <p class="status-note" *ngIf="syncMessage()">
+        {{ syncMessage() }}
+      </p>
+
+      <div class="actions">
+        <button mat-stroked-button type="button" (click)="refreshConnectionStatus()">
+          Refresh status
+        </button>
+        <button mat-stroked-button type="button" (click)="refreshAccessToken()">
+          Refresh token
+        </button>
+        <button mat-flat-button color="primary" type="button" (click)="reconnectAirtable()">
+          Reconnect Airtable
+        </button>
+        <button
+          mat-flat-button
+          color="accent"
+          type="button"
+          (click)="runFullSync()"
+          [disabled]="syncRunning()"
+        >
+          Run full sync
+        </button>
+      </div>
+
+      <div class="busy-row" *ngIf="isBusy()">
+        <mat-spinner diameter="22"></mat-spinner>
+        <span>Talking to the backend authentication endpoints...</span>
+      </div>
+      <div class="busy-row" *ngIf="syncRunning()">
+        <mat-spinner diameter="22"></mat-spinner>
+        <span>Syncing bases, tables, records, and discovered users...</span>
+      </div>
+    </mat-card>
+
+    <mat-card class="status-card scraper-card" appearance="outlined">
+      <p class="eyebrow">Revision Scraper</p>
+      <h2>Browser session and MFA</h2>
+      <p class="lede compact">
+        Provide Airtable login details only when you need to refresh cookies or satisfy MFA.
+        If backend env credentials are configured, these fields can be left empty.
+      </p>
+
+      <div class="scraper-form">
+        <mat-form-field appearance="outline">
+          <mat-label>Session Email</mat-label>
+          <input matInput type="email" [(ngModel)]="scraperForm.email" />
+        </mat-form-field>
+
+        <mat-form-field appearance="outline">
+          <mat-label>Session Password</mat-label>
+          <input matInput type="password" [(ngModel)]="scraperForm.password" />
+        </mat-form-field>
+
+        <mat-form-field appearance="outline">
+          <mat-label>MFA Code</mat-label>
+          <input matInput type="text" [(ngModel)]="scraperForm.mfaCode" />
+        </mat-form-field>
+
+        <mat-form-field appearance="outline">
+          <mat-label>Revision Page Limit</mat-label>
+          <input matInput type="number" min="1" max="5000" [(ngModel)]="scraperForm.limit" />
+        </mat-form-field>
+      </div>
+
+      <mat-slide-toggle [(ngModel)]="scraperForm.forceRelogin">
+        Force fresh Airtable login before scraping
+      </mat-slide-toggle>
+
+      <p class="status-note" *ngIf="scraperMessage()">
+        {{ scraperMessage() }}
+      </p>
+
+      <div class="actions">
+        <button mat-stroked-button type="button" (click)="validateRevisionSession()" [disabled]="scraperBusy()">
+          Validate cookies
+        </button>
+        <button mat-stroked-button type="button" (click)="loginRevisionSession()" [disabled]="scraperBusy()">
+          Refresh cookies
+        </button>
+        <button
+          mat-flat-button
+          color="primary"
+          type="button"
+          (click)="scrapeRevisionHistory()"
+          [disabled]="scraperBusy()"
+        >
+          Scrape revision history
+        </button>
+      </div>
+
+      <div class="busy-row" *ngIf="scraperBusy()">
+        <mat-spinner diameter="22"></mat-spinner>
+        <span>Refreshing Airtable cookies, validating the session, or scraping revision history...</span>
+      </div>
+    </mat-card>
+  </section>
 </main>
