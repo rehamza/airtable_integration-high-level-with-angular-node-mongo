@@ -15,8 +15,13 @@
 
   <div class="toolbar-right">
     <span class="raw-data-label">Raw Data Logs</span>
-    <button mat-flat-button color="warn" type="button" (click)="deleteGrid()">
-      Delete Grid
+    <button
+      mat-flat-button
+      color="warn"
+      type="button"
+      (click)="deleteGrid()"
+    >
+      {{ selectedRowsCount() > 0 ? ('Delete Selected (' + selectedRowsCount() + ')') : 'Delete Grid' }}
     </button>
   </div>
 </mat-toolbar>
@@ -70,9 +75,13 @@
 
       <mat-form-field appearance="outline">
         <mat-label>Entity</mat-label>
-        <mat-select [(ngModel)]="filters.entity" (selectionChange)="handleEntitySelectionChange()">
+        <mat-select
+          [(ngModel)]="filters.tableId"
+          (selectionChange)="handleTableSelectionChange()"
+          [disabled]="!filters.baseId || tableOptions().length === 0"
+        >
           <mat-option
-            *ngFor="let option of entityOptions()"
+            *ngFor="let option of tableOptions()"
             [value]="option.value"
           >
             {{ option.label }}
@@ -83,13 +92,11 @@
       <mat-form-field appearance="outline">
         <mat-label>Processed Entity</mat-label>
         <mat-select
-          [(ngModel)]="filters.processedEntity"
-          (selectionChange)="handleProcessedEntityChange()"
-          [disabled]="processedEntityOptions().length === 0"
+          [(ngModel)]="filters.entity"
+          (selectionChange)="handleCollectionSelectionChange()"
         >
-          <mat-option value="">All Tables</mat-option>
           <mat-option
-            *ngFor="let option of processedEntityOptions()"
+            *ngFor="let option of collectionOptions()"
             [value]="option.value"
           >
             {{ option.label }}
@@ -122,10 +129,10 @@
   <section class="workspace-grid">
     <div class="grid-topbar">
       <div class="grid-topbar-left">
-        <h2>{{ filters.entity }}</h2>
+        <h2>{{ selectedCollectionLabel }}</h2>
         <p>
           {{ footer().from }} to {{ footer().to }} of {{ footer().total }}
-          <span *ngIf="filters.processedEntity"> · table filtered</span>
+          <span *ngIf="selectedTableLabel"> · {{ selectedTableLabel }}</span>
         </p>
       </div>
 

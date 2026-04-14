@@ -2,8 +2,12 @@ import { Injectable } from '@nestjs/common';
 import { load, type CheerioAPI } from 'cheerio';
 
 export interface ParsedRevisionHistoryChange {
-  changeType: 'status' | 'assignee';
-  fieldName: 'Status' | 'Assignee';
+  activityId?: string;
+  changeType: string;
+  columnType: string;
+  fieldName: string;
+  columnId?: string;
+  groupType?: string;
   oldValue?: unknown;
   newValue?: unknown;
   changedAt: Date;
@@ -21,263 +25,266 @@ interface ParseRevisionHistoryInput {
   sourceUrl?: string;
 }
 
+interface AirtableActivityUser {
+  id?: string;
+  email?: string;
+  name?: string;
+}
+
+interface AirtableActivityInfo {
+  createdTime?: string;
+  originatingUserId?: string;
+  diffRowHtml?: string;
+  groupType?: string;
+}
+
+interface AirtableRevisionHistoryApiPayload {
+  orderedActivityAndCommentIds?: string[];
+  rowActivityInfoById?: Record<string, AirtableActivityInfo>;
+  rowActivityOrCommentUserObjById?: Record<string, AirtableActivityUser>;
+}
+
 @Injectable()
 export class AirtableRevisionParserService {
   parseRevisionHistory(input: ParseRevisionHistoryInput): ParsedRevisionHistoryChange[] {
-    const $ = load(input.html);
-    const fallbackChangedAt = new Date();
+    return this.parseDiffRowHtml({
+      diffRowHtml: input.html,
+      sourceUrl: input.sourceUrl,
+      changedAt: new Date(),
+      changedBy: {},
+      activityId: undefined,
+      groupType: undefined,
+    });
+  }
+
+  parseRevisionHistoryApiPayload(
+    payload: AirtableRevisionHistoryApiPayload,
+    input: { sourceUrl?: string } = {},
+  ): ParsedRevisionHistoryChange[] {
+    const orderedIds = payload.orderedActivityAndCommentIds ?? [];
+    const activities = payload.rowActivityInfoById ?? {};
+    const users = payload.rowActivityOrCommentUserObjById ?? {};
     const changes: ParsedRevisionHistoryChange[] = [];
-    const seen = new Set<string>();
 
-    for (const selector of this.getCandidateSelectors()) {
-      $(selector).each((_, element) => {
-        const root = $(element);
-        const text = this.normalizeWhitespace(root.text());
+    for (const activityId of orderedIds) {
+      const activity = activities[activityId];
 
-        if (!this.looksRelevant(text)) {
-          return;
-        }
+      if (!activity?.diffRowHtml) {
+        continue;
+      }
 
-        const parsedChange = this.parseChangeFromText(text);
+      const user = activity.originatingUserId
+        ? users[activity.originatingUserId]
+        : undefined;
+      const changedAt = activity.createdTime
+        ? new Date(activity.createdTime)
+        : new Date();
 
-        if (!parsedChange) {
-          return;
-        }
-
-        const changedAt = this.extractChangedAt($, root, fallbackChangedAt);
-        const changedBy = this.extractActor(root, text);
-        const snippet = $.html(root).slice(0, 4000);
-        const dedupeKey = [
-          parsedChange.changeType,
-          parsedChange.fieldName,
-          changedAt.toISOString(),
-          JSON.stringify(parsedChange.oldValue ?? null),
-          JSON.stringify(parsedChange.newValue ?? null),
-          changedBy.userId ?? changedBy.email ?? changedBy.name ?? '',
-        ].join('|');
-
-        if (seen.has(dedupeKey)) {
-          return;
-        }
-
-        seen.add(dedupeKey);
-        changes.push({
-          ...parsedChange,
-          changedAt,
-          changedBy,
-          rawHtmlSnippet: snippet,
+      changes.push(
+        ...this.parseDiffRowHtml({
+          diffRowHtml: activity.diffRowHtml,
           sourceUrl: input.sourceUrl,
-        });
-      });
+          changedAt: Number.isNaN(changedAt.getTime()) ? new Date() : changedAt,
+          changedBy: {
+            userId: activity.originatingUserId,
+            email: user?.email,
+            name: user?.name,
+          },
+          activityId,
+          groupType: activity.groupType,
+        }),
+      );
     }
 
     return changes.sort((left, right) => left.changedAt.getTime() - right.changedAt.getTime());
   }
 
-  private getCandidateSelectors(): string[] {
-    return [
-      '[data-activity-id]',
-      '[data-testid*="activity"]',
-      '[data-test-id*="activity"]',
-      '[data-change-type]',
-      '.activity',
-      '.activity-row',
-      '.record-activity',
-      'article',
-      'li',
-      'div',
-    ];
-  }
+  private parseDiffRowHtml(input: {
+    diffRowHtml: string;
+    sourceUrl?: string;
+    changedAt: Date;
+    changedBy: {
+      userId?: string;
+      name?: string;
+      email?: string;
+    };
+    activityId?: string;
+    groupType?: string;
+  }): ParsedRevisionHistoryChange[] {
+    const $ = load(input.diffRowHtml);
+    const changes: ParsedRevisionHistoryChange[] = [];
+    const seen = new Set<string>();
 
-  private looksRelevant(text: string): boolean {
-    return /\b(status|assignee|assigned|unassigned)\b/i.test(text);
-  }
+    $('.historicalCellContainer').each((_, element) => {
+      const container = $(element);
+      const fieldName = this.normalizeWhitespace(
+        container
+          .find('[columnid], [columnId], .micro.strong')
+          .first()
+          .text(),
+      );
 
-  private parseChangeFromText(
-    text: string,
-  ):
-    | Pick<
-        ParsedRevisionHistoryChange,
-        'changeType' | 'fieldName' | 'oldValue' | 'newValue'
-      >
-    | null {
-    const statusPatterns = [
-      /\bstatus\b.*?\bfrom\b\s+(.+?)\s+\bto\b\s+(.+?)(?:[.!]|$)/i,
-      /\bstatus\b.*?\bto\b\s+(.+?)(?:[.!]|$)/i,
-      /\bstatus\b.*?\bset\b.*?\bto\b\s+(.+?)(?:[.!]|$)/i,
-    ];
-    const assigneePatterns = [
-      /\bassignee\b.*?\bfrom\b\s+(.+?)\s+\bto\b\s+(.+?)(?:[.!]|$)/i,
-      /\bassignee\b.*?\bto\b\s+(.+?)(?:[.!]|$)/i,
-      /\bassigned\b.*?\bto\b\s+(.+?)(?:[.!]|$)/i,
-      /\bunassigned\b(?:\s+(.+?))?(?:[.!]|$)/i,
-    ];
-
-    for (const pattern of statusPatterns) {
-      const match = text.match(pattern);
-
-      if (match) {
-        const oldValue = match[2] ? this.normalizeValue(match[1]) : undefined;
-        const newValue = this.normalizeValue(match[2] ?? match[1]);
-
-        return {
-          changeType: 'status',
-          fieldName: 'Status',
-          oldValue,
-          newValue,
-        };
+      if (!fieldName) {
+        return;
       }
-    }
 
-    for (const pattern of assigneePatterns) {
-      const match = text.match(pattern);
+      const columnId =
+        container.find('[columnid]').first().attr('columnid') ??
+        container.find('[columnId]').first().attr('columnId') ??
+        undefined;
+      const valueRoot =
+        container.find('.historicalCellValue').first();
+      const columnType =
+        valueRoot.attr('data-columntype')?.trim() ||
+        this.toSnakeCase(fieldName);
+      const { oldValue, newValue, isMeaningful } = this.extractValuesFromContainer(
+        $,
+        container,
+      );
 
-      if (match) {
-        const isFromToPattern = Boolean(match[2]);
-        const oldValue = isFromToPattern ? this.normalizeValue(match[1]) : undefined;
-        const newValue = /unassigned/i.test(text)
-          ? null
-          : this.normalizeValue(match[2] ?? match[1]);
-
-        return {
-          changeType: 'assignee',
-          fieldName: 'Assignee',
-          oldValue,
-          newValue,
-        };
+      if (!isMeaningful) {
+        return;
       }
-    }
 
-    return null;
+      const dedupeKey = [
+        input.activityId ?? '',
+        fieldName,
+        columnType,
+        input.changedAt.toISOString(),
+        JSON.stringify(oldValue ?? null),
+        JSON.stringify(newValue ?? null),
+      ].join('|');
+
+      if (seen.has(dedupeKey)) {
+        return;
+      }
+
+      seen.add(dedupeKey);
+      changes.push({
+        activityId: input.activityId,
+        changeType: this.toSnakeCase(fieldName),
+        columnType,
+        fieldName,
+        columnId,
+        groupType: input.groupType,
+        oldValue,
+        newValue,
+        changedAt: input.changedAt,
+        changedBy: input.changedBy,
+        rawHtmlSnippet: $.html(container).slice(0, 4000),
+        sourceUrl: input.sourceUrl,
+      });
+    });
+
+    return changes;
   }
 
-  private extractChangedAt(
+  private extractValuesFromContainer(
     $: CheerioAPI,
-    root: ReturnType<CheerioAPI>,
-    fallback: Date,
-  ): Date {
-    const datetimeCandidate =
-      root.find('time[datetime]').first().attr('datetime') ??
-      root.find('[datetime]').first().attr('datetime') ??
-      root.find('[data-timestamp]').first().attr('data-timestamp') ??
-      root.find('[data-time]').first().attr('data-time');
+    container: ReturnType<CheerioAPI>,
+  ): { oldValue?: unknown; newValue?: unknown; isMeaningful: boolean } {
+    const valueRoot = container.find('.historicalCellValue').first();
+    const classes = valueRoot.attr('class') ?? '';
 
-    if (datetimeCandidate) {
-      const parsed = this.parseDate(datetimeCandidate);
-
-      if (parsed) {
-        return parsed;
-      }
+    if (!valueRoot.length) {
+      return { isMeaningful: false };
     }
 
-    const unixTimestamp =
-      root.attr('data-timestamp') ??
-      root.find('[data-unix-ts]').first().attr('data-unix-ts') ??
-      root.find('[data-ts]').first().attr('data-ts');
+    if (classes.includes('diff')) {
+      const oldBlock =
+        valueRoot.find('.colors-background-negative').first().length
+          ? valueRoot.find('.colors-background-negative').first()
+          : valueRoot.find('.strikethrough').first();
+      const newBlock =
+        valueRoot.find('.colors-background-success').last().length
+          ? valueRoot.find('.colors-background-success').last()
+          : valueRoot.children().last();
 
-    if (unixTimestamp) {
-      const numericValue = Number(unixTimestamp);
-
-      if (Number.isFinite(numericValue)) {
-        const parsed = new Date(
-          numericValue > 9_999_999_999 ? numericValue : numericValue * 1000,
-        );
-
-        if (!Number.isNaN(parsed.getTime())) {
-          return parsed;
-        }
-      }
+      return {
+        oldValue: this.extractNodeValue($, oldBlock),
+        newValue: this.extractNodeValue($, newBlock),
+        isMeaningful: true,
+      };
     }
 
-    const text = this.normalizeWhitespace(root.text());
-    const isoTextMatch = text.match(
-      /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\b/,
-    );
-
-    if (isoTextMatch) {
-      const parsed = this.parseDate(isoTextMatch[0]);
-
-      if (parsed) {
-        return parsed;
-      }
+    if (classes.includes('nullToValue')) {
+      return {
+        oldValue: null,
+        newValue: this.extractNodeValue($, valueRoot),
+        isMeaningful: true,
+      };
     }
 
-    return fallback;
-  }
+    if (classes.includes('valueToNull')) {
+      return {
+        oldValue: this.extractNodeValue($, valueRoot),
+        newValue: null,
+        isMeaningful: true,
+      };
+    }
 
-  private extractActor(root: ReturnType<CheerioAPI>, text: string) {
-    const userId =
-      root.attr('data-user-id') ??
-      root.find('[data-user-id]').first().attr('data-user-id') ??
-      root.find('[data-collaborator-id]').first().attr('data-collaborator-id');
-    const emailHref = root.find('a[href^="mailto:"]').first().attr('href');
-    const email =
-      (emailHref ? emailHref.replace(/^mailto:/i, '') : undefined) ??
-      this.extractEmailFromText(text);
-    const name =
-      root.attr('data-user-name') ??
-      root.find('[data-user-name]').first().attr('data-user-name') ??
-      root.find('img[alt]').first().attr('alt') ??
-      root.find('[title]').first().attr('title') ??
-      this.extractActorNameFromText(text);
+    const textValue = this.extractNodeValue($, valueRoot);
+
+    if (textValue === undefined || textValue === null || textValue === '') {
+      return { isMeaningful: false };
+    }
 
     return {
-      userId: userId?.trim() || undefined,
-      name: name?.trim() || undefined,
-      email: email?.trim().toLowerCase() || undefined,
+      oldValue: undefined,
+      newValue: textValue,
+      isMeaningful: true,
     };
   }
 
-  private extractEmailFromText(text: string): string | undefined {
-    const emailMatch = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
-
-    return emailMatch?.[0];
-  }
-
-  private extractActorNameFromText(text: string): string | undefined {
-    const actorMatch = text.match(
-      /^(.+?)\s+(?:changed|set|updated|assigned|unassigned)\b/i,
-    );
-
-    if (!actorMatch) {
+  private extractNodeValue(
+    $: CheerioAPI,
+    node: ReturnType<CheerioAPI>,
+  ): unknown {
+    if (!node.length) {
       return undefined;
     }
 
-    const candidate = this.normalizeWhitespace(actorMatch[1]);
+    const textDiffParts = node
+      .find('.pre-wrap')
+      .toArray()
+      .map((element) => this.normalizeTextValue($(element).text()))
+      .filter((value) => value !== undefined);
 
-    if (!candidate || /^(status|assignee)$/i.test(candidate)) {
-      return undefined;
+    if (textDiffParts.length > 0) {
+      return textDiffParts.join(' ').trim();
     }
 
-    return candidate;
+    const directText = this.normalizeTextValue(node.text());
+
+    return directText;
   }
 
-  private normalizeValue(value: string | undefined): unknown {
-    if (!value) {
+  private normalizeTextValue(value: string | undefined): string | undefined {
+    if (value === undefined) {
       return undefined;
     }
 
     const normalized = this.normalizeWhitespace(
       value
-        .replace(/^["']|["']$/g, '')
-        .replace(/\s+\bat\b\s+\d{1,2}:\d{2}.*$/i, '')
-        .replace(/\s+\bon\b\s+\w+\s+\d{1,2},\s+\d{4}.*$/i, ''),
+        .replace(/\u00a0/g, ' ')
+        .replace(/^\s+|\s+$/g, ''),
     );
 
-    if (!normalized || /^(none|null|empty|blank|unassigned|no one)$/i.test(normalized)) {
-      return null;
+    if (!normalized) {
+      return undefined;
     }
 
     return normalized;
   }
 
-  private normalizeWhitespace(value: string): string {
-    return value.replace(/\s+/g, ' ').trim();
+  private normalizeWhitespace(value: string | undefined): string {
+    return (value ?? '').replace(/\s+/g, ' ').trim();
   }
 
-  private parseDate(value: string): Date | null {
-    const parsed = new Date(value);
-
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  private toSnakeCase(value: string): string {
+    return this.normalizeWhitespace(value)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
   }
 }

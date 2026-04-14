@@ -278,13 +278,33 @@ export class AirtableDataService {
       ['oldValue', 'newValue'],
     );
 
-    return this.findPaginated(this.airtableRevisionHistoryModel, mongoFilter, {
-      page: query.page,
-      pageSize: query.pageSize,
-      sortBy: query.sortBy,
-      sortOrder: query.sortOrder,
-      defaultSortField: 'changedAt',
-    });
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 100;
+    const skip = (page - 1) * pageSize;
+    const [rowsResult, total] = await Promise.all([
+      this.airtableRevisionHistoryModel
+        .find(mongoFilter)
+        .sort(this.buildSort(query.sortBy, query.sortOrder, 'changedAt'))
+        .skip(skip)
+        .limit(pageSize)
+        .lean()
+        .exec(),
+      this.airtableRevisionHistoryModel.countDocuments(mongoFilter).exec(),
+    ]);
+    const rows = await this.enrichRevisionHistoryRows(
+      rowsResult as unknown as Array<Record<string, unknown>>,
+      String(integration._id),
+    );
+
+    return {
+      data: rows.map((row) => this.serialize(row)),
+      meta: {
+        page,
+        pageSize,
+        total,
+        totalPages: Math.max(Math.ceil(total / pageSize), 1),
+      },
+    };
   }
 
   async listScrapeJobs(
@@ -426,6 +446,41 @@ export class AirtableDataService {
         },
       ],
     };
+  }
+
+  private async enrichRevisionHistoryRows(
+    rows: Array<Record<string, unknown>>,
+    integrationId: string,
+  ): Promise<Array<Record<string, unknown>>> {
+    const tableIds = [...new Set(
+      rows
+        .map((row) => (typeof row.tableId === 'string' ? row.tableId : undefined))
+        .filter((value): value is string => Boolean(value)),
+    )];
+
+    if (!tableIds.length) {
+      return rows;
+    }
+
+    const tables = await this.airtableTableModel
+      .find({
+        integrationId,
+        tableId: { $in: tableIds },
+      })
+      .select({ tableId: 1, name: 1 })
+      .lean()
+      .exec();
+    const tableNameById = new Map(
+      tables.map((table) => [table.tableId, table.name]),
+    );
+
+    return rows.map((row) => ({
+      ...row,
+      tableName:
+        typeof row.tableName === 'string' && row.tableName.trim()
+          ? row.tableName
+          : tableNameById.get(String(row.tableId)) ?? row.tableName,
+    }));
   }
 
   private createStringifiedSearchExpression(field: string, pattern: string) {

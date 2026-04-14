@@ -83,9 +83,10 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
   readonly rowData = signal<Array<Record<string, unknown>>>([]);
   readonly columnDefs = signal<ColDef[]>([]);
   readonly selectedRowsCount = signal(0);
+  readonly selectedRowIds = signal<string[]>([]);
   readonly activeIntegrationOptions = signal<GridSelectOption[]>([]);
-  readonly entityOptions = signal<GridSelectOption[]>([]);
-  readonly processedEntityOptions = signal<GridSelectOption[]>([]);
+  readonly collectionOptions = signal<GridSelectOption[]>([]);
+  readonly tableOptions = signal<GridSelectOption[]>([]);
   readonly footer = signal<GridFooterSummary>({
     rowsSelected: 0,
     pageSize: 100,
@@ -98,7 +99,7 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
   readonly filters = {
     baseId: '',
     entity: 'airtable_pages' as AirtableGridEntity,
-    processedEntity: '',
+    tableId: '',
     search: '',
     page: 1,
     pageSize: 100,
@@ -138,6 +139,19 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
 
   private filterDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  get selectedCollectionLabel(): string {
+    return (
+      this.collectionOptions().find((option) => option.value === this.filters.entity)?.label ??
+      this.filters.entity
+    );
+  }
+
+  get selectedTableLabel(): string | null {
+    return (
+      this.tableOptions().find((option) => option.value === this.filters.tableId)?.label ?? null
+    );
+  }
 
   async ngOnInit(): Promise<void> {
     await this.authService.loadStatus({ force: true });
@@ -254,9 +268,10 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
         `Revision scrape completed. ${result.recordsProcessed}/${result.recordsTotal} pages processed, ${result.revisionsStored} changes stored.`,
       );
       await this.authService.loadStatus({ force: true });
-      if (this.filters.entity === 'airtable_revision_history') {
-        await this.loadGridData();
-      }
+      this.filters.entity = 'airtable_revision_history';
+      this.filters.page = 1;
+      await this.loadGridOptions();
+      await this.loadGridData();
       this.clearSensitiveScraperFields();
     } catch (error) {
       this.scraperMessage.set(
@@ -274,20 +289,21 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
   }
 
   async handleBaseSelectionChange(): Promise<void> {
-    this.filters.processedEntity = '';
+    this.filters.tableId = '';
     this.filters.page = 1;
     await this.loadGridOptions();
+    this.selectDefaultTableIfAvailable();
     await this.loadGridData();
   }
 
-  async handleEntitySelectionChange(): Promise<void> {
-    this.filters.processedEntity = '';
+  async handleCollectionSelectionChange(): Promise<void> {
     this.filters.page = 1;
     await this.loadGridOptions();
+    this.selectDefaultTableIfAvailable();
     await this.loadGridData();
   }
 
-  async handleProcessedEntityChange(): Promise<void> {
+  async handleTableSelectionChange(): Promise<void> {
     this.filters.page = 1;
     await this.loadGridData();
   }
@@ -322,8 +338,39 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
     await this.loadGridData();
   }
 
-  deleteGrid(): void {
+  async deleteGrid(): Promise<void> {
+    const selectedIds = this.selectedRowIds();
+
+    if (selectedIds.length > 0) {
+      this.gridLoading.set(true);
+      this.gridError.set(null);
+
+      try {
+        const result = await this.gridDataService.deleteRows({
+          entity: this.filters.entity,
+          ids: selectedIds,
+        });
+
+        this.scraperMessage.set(
+          `Deleted ${result.deletedCount} selected row(s) from ${result.entity}.`,
+        );
+        this.gridApi()?.deselectAll();
+        this.selectedRowIds.set([]);
+        this.selectedRowsCount.set(0);
+        await this.loadGridData();
+      } catch (error) {
+        this.gridError.set(
+          error instanceof Error ? error.message : 'Failed to delete selected rows.',
+        );
+      } finally {
+        this.gridLoading.set(false);
+      }
+
+      return;
+    }
+
     this.gridApi()?.deselectAll();
+    this.selectedRowIds.set([]);
     this.rowData.set([]);
     this.columnDefs.set([]);
     this.selectedRowsCount.set(0);
@@ -378,8 +425,13 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
   }
 
   onSelectionChanged(event: SelectionChangedEvent): void {
-    const selectedCount = event.api.getSelectedRows().length;
+    const selectedRows = event.api.getSelectedRows();
+    const selectedCount = selectedRows.length;
+    const selectedIds = selectedRows
+      .map((row) => row?.['_id'])
+      .filter((value): value is string => typeof value === 'string' && value.length > 0);
 
+    this.selectedRowIds.set(selectedIds);
     this.selectedRowsCount.set(selectedCount);
     this.footer.update((footer) => ({
       ...footer,
@@ -426,8 +478,8 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
 
   private applyGridOptions(options: GridOptionsResponse): void {
     this.activeIntegrationOptions.set(options.activeIntegrationOptions);
-    this.entityOptions.set(options.entityOptions);
-    this.processedEntityOptions.set(options.processedEntityOptions);
+    this.collectionOptions.set(options.entityOptions);
+    this.tableOptions.set(options.processedEntityOptions);
 
     if (
       this.filters.baseId &&
@@ -437,13 +489,26 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
     }
 
     if (
-      this.filters.processedEntity &&
-      !options.processedEntityOptions.some(
-        (option) => option.value === this.filters.processedEntity,
-      )
+      this.filters.tableId &&
+      !options.processedEntityOptions.some((option) => option.value === this.filters.tableId)
     ) {
-      this.filters.processedEntity = '';
+      this.filters.tableId = '';
     }
+
+    if (
+      this.filters.entity &&
+      !options.entityOptions.some((option) => option.value === this.filters.entity)
+    ) {
+      this.filters.entity = 'airtable_pages';
+    }
+  }
+
+  private selectDefaultTableIfAvailable(): void {
+    if (this.filters.tableId || !this.filters.baseId || this.tableOptions().length === 0) {
+      return;
+    }
+
+    this.filters.tableId = this.tableOptions()[0]?.value ?? '';
   }
 
   private async loadGridData(
@@ -456,7 +521,7 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
       const response = await this.gridDataService.getGridData({
         baseId: this.filters.baseId || undefined,
         entity: this.filters.entity,
-        processedEntity: this.filters.processedEntity || undefined,
+        processedEntity: this.filters.tableId || undefined,
         search: this.filters.search || undefined,
         sortBy: this.filters.sortBy || undefined,
         sortOrder: this.filters.sortOrder || undefined,
@@ -480,8 +545,11 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
     } catch (error) {
       this.rowData.set([]);
       this.columnDefs.set([]);
+      this.selectedRowIds.set([]);
+      this.selectedRowsCount.set(0);
       this.footer.update((footer) => ({
         ...footer,
+        rowsSelected: 0,
         total: 0,
         from: 0,
         to: 0,
@@ -546,7 +614,7 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
 
   private resetGridFilters(input: { keepEntity: boolean }): void {
     this.filters.baseId = '';
-    this.filters.processedEntity = '';
+    this.filters.tableId = '';
     this.filters.search = '';
     this.filters.page = 1;
     this.filters.pageSize = 100;

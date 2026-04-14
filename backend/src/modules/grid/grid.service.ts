@@ -24,6 +24,7 @@ import {
 } from '../airtable/schemas/airtable-revision-history.schema';
 import { GridOptionsQueryDto } from './dto/grid-options-query.dto';
 import { GridDataQueryDto } from './dto/grid-data-query.dto';
+import { GridDeleteDto } from './dto/grid-delete.dto';
 
 type SupportedEntity =
   | 'airtable_bases'
@@ -137,12 +138,15 @@ export class GridService {
     const skip = (page - 1) * pageSize;
     const filterModel = this.parseFilterModel(query.filterModel);
     const queryFilter = this.buildBaseFilter(entity, String(integration._id), query);
-    const sampleDocuments = await entityConfig.model
+    let sampleDocuments = await entityConfig.model
       .find(queryFilter)
       .sort(this.buildSort(query.sortBy, query.sortOrder, entityConfig.defaultSortField))
       .limit(50)
       .lean()
       .exec();
+    if (entity === 'airtable_revision_history') {
+      sampleDocuments = await this.enrichRevisionHistoryRows(sampleDocuments, String(integration._id));
+    }
     const columns = await this.buildColumns(entity, sampleDocuments, query);
     const globalSearchPaths = this.getGlobalSearchPaths(entity, columns, query);
     const filterExpression = this.buildFilterExpression({
@@ -158,7 +162,7 @@ export class GridService {
             $and: filterExpression,
           }
         : queryFilter;
-    const [rows, total] = await Promise.all([
+    const [rowsResult, total] = await Promise.all([
       entityConfig.model
         .find(mongoFilter)
         .sort(this.buildSort(query.sortBy, query.sortOrder, entityConfig.defaultSortField))
@@ -168,6 +172,10 @@ export class GridService {
         .exec(),
       entityConfig.model.countDocuments(mongoFilter).exec(),
     ]);
+    const rows =
+      entity === 'airtable_revision_history'
+        ? await this.enrichRevisionHistoryRows(rowsResult, String(integration._id))
+        : rowsResult;
 
     return {
       entity,
@@ -188,6 +196,25 @@ export class GridService {
         currentPage: page,
         totalPages: Math.max(Math.ceil(total / pageSize), 1),
       },
+    };
+  }
+
+  async deleteRows(body: GridDeleteDto) {
+    const entity = body.entity as SupportedEntity;
+    const integration = await this.integrationsService.requireOneByProviderAndKey(
+      'airtable',
+      body.integrationKey ?? 'default',
+    );
+    const entityConfig = this.getEntityConfig(entity);
+    const deleteResult = await entityConfig.model.deleteMany({
+      _id: { $in: body.ids },
+      integrationId: integration._id,
+    });
+
+    return {
+      entity,
+      requestedCount: body.ids.length,
+      deletedCount: deleteResult.deletedCount ?? 0,
     };
   }
 
@@ -293,7 +320,24 @@ export class GridService {
     }
 
     const orderedKeys = [...discoveredColumns.keys()].sort((left, right) => {
-      const priority = ['baseId', 'tableId', 'recordId', 'name', 'email', 'changeType', 'changedAt'];
+      const priority = [
+        'uuid',
+        'activityId',
+        'issueId',
+        'recordId',
+        'columnType',
+        'changeType',
+        'oldValue',
+        'newValue',
+        'createdDate',
+        'changedAt',
+        'authoredBy',
+        'baseId',
+        'tableName',
+        'tableId',
+        'name',
+        'email',
+      ];
       const leftPriority = priority.indexOf(left);
       const rightPriority = priority.indexOf(right);
 
@@ -384,6 +428,41 @@ export class GridService {
       .filter((field) => !field.startsWith('raw') && !field.startsWith('metadata'));
 
     return [...new Set([...config.searchFields, ...discoveredPaths])];
+  }
+
+  private async enrichRevisionHistoryRows(
+    rows: GridDocumentRow[],
+    integrationId: string,
+  ): Promise<GridDocumentRow[]> {
+    const tableIds = [...new Set(
+      rows
+        .map((row) => (typeof row.tableId === 'string' ? row.tableId : undefined))
+        .filter((value): value is string => Boolean(value)),
+    )];
+
+    if (!tableIds.length) {
+      return rows;
+    }
+
+    const tables = await this.airtableTableModel
+      .find({
+        integrationId,
+        tableId: { $in: tableIds },
+      })
+      .select({ tableId: 1, name: 1 })
+      .lean()
+      .exec();
+    const tableNameById = new Map(
+      tables.map((table) => [table.tableId, table.name]),
+    );
+
+    return rows.map((row) => ({
+      ...row,
+      tableName:
+        typeof row.tableName === 'string' && row.tableName.trim()
+          ? row.tableName
+          : tableNameById.get(String(row.tableId)) ?? row.tableName,
+    }));
   }
 
   private buildFilterExpression(input: {

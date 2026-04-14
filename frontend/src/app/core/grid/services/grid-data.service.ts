@@ -20,6 +20,11 @@ export interface GridDataRequest {
   filterModel?: Record<string, unknown>;
 }
 
+export interface GridDeleteRequest {
+  entity: AirtableGridEntity;
+  ids: string[];
+}
+
 @Injectable({ providedIn: 'root' })
 export class GridDataService {
   private readonly httpClient = inject(HttpClient);
@@ -90,6 +95,24 @@ export class GridDataService {
           `${clientAppConfig.apiBaseUrl}/grid/data`,
           { params },
         ),
+      );
+    } catch (error) {
+      throw new Error(this.describeHttpError(error));
+    }
+  }
+
+  async deleteRows(input: GridDeleteRequest): Promise<{ entity: AirtableGridEntity; requestedCount: number; deletedCount: number }> {
+    try {
+      return await firstValueFrom(
+        this.httpClient.post<{
+          entity: AirtableGridEntity;
+          requestedCount: number;
+          deletedCount: number;
+        }>(`${clientAppConfig.apiBaseUrl}/grid/delete`, {
+          integrationKey: clientAppConfig.airtableIntegrationKey,
+          entity: input.entity,
+          ids: input.ids,
+        }),
       );
     } catch (error) {
       throw new Error(this.describeHttpError(error));

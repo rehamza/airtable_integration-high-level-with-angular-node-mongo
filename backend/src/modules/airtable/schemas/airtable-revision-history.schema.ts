@@ -36,19 +36,39 @@ export class AirtableRevisionHistory {
   @Prop({ required: true, trim: true, index: true })
   tableId!: string;
 
+  @Prop({ trim: true })
+  tableName?: string;
+
   @Prop({ required: true, trim: true, index: true })
   recordId!: string;
+
+  @Prop({ trim: true, index: true })
+  activityId?: string;
+
+  @Prop({ required: true, trim: true, index: true })
+  uuid!: string;
+
+  @Prop({ required: true, trim: true, index: true })
+  issueId!: string;
 
   @Prop({
     required: true,
     trim: true,
     lowercase: true,
-    enum: ['status', 'assignee'],
   })
   changeType!: string;
 
+  @Prop({ required: true, trim: true, lowercase: true })
+  columnType!: string;
+
   @Prop({ required: true, trim: true })
   fieldName!: string;
+
+  @Prop({ trim: true })
+  columnId?: string;
+
+  @Prop({ trim: true, lowercase: true })
+  groupType?: string;
 
   @Prop({ type: MongooseSchema.Types.Mixed })
   oldValue?: unknown;
@@ -59,8 +79,14 @@ export class AirtableRevisionHistory {
   @Prop({ required: true })
   changedAt!: Date;
 
+  @Prop({ required: true })
+  createdDate!: Date;
+
   @Prop({ type: RevisionActor, default: {} })
   changedBy!: RevisionActor;
+
+  @Prop({ trim: true })
+  authoredBy?: string;
 
   @Prop({ required: true, trim: true })
   dedupeKey!: string;
@@ -78,5 +104,6 @@ export class AirtableRevisionHistory {
 export const AirtableRevisionHistorySchema = SchemaFactory.createForClass(AirtableRevisionHistory);
 
 AirtableRevisionHistorySchema.index({ dedupeKey: 1 }, { unique: true });
+AirtableRevisionHistorySchema.index({ uuid: 1 }, { unique: true });
 AirtableRevisionHistorySchema.index({ integrationId: 1, recordId: 1, changedAt: -1 });
 AirtableRevisionHistorySchema.index({ integrationId: 1, changeType: 1, changedAt: -1 });

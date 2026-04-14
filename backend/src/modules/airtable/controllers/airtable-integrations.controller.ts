@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Res, ValidationPipe } from '@nestjs/common';
 import type { Response } from 'express';
 import { AirtableIntegrationQueryDto } from '../dto/airtable-integration-query.dto';
 import { AirtableOAuthCallbackDto } from '../dto/airtable-oauth-callback.dto';
@@ -38,7 +38,14 @@ export class AirtableIntegrationsController {
 
   @Get('callback')
   async callback(
-    @Query() query: AirtableOAuthCallbackDto,
+    @Query(
+      new ValidationPipe({
+        transform: true,
+        whitelist: true,
+        forbidNonWhitelisted: false,
+      }),
+    )
+    query: AirtableOAuthCallbackDto,
     @Res() response: Response,
   ) {
     const redirectUrl = await this.airtableOAuthService.handleCallback(query);
