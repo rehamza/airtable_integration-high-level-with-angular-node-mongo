@@ -31,10 +31,21 @@ interface AirtableActivityUser {
   name?: string;
 }
 
+interface DeserializedActivityItem {
+  columnId?: string;
+  columnName?: string;
+  columnType?: string;
+  previousCellValueObject?: unknown;
+  currentCellValueObject?: unknown;
+  previousDisplayString?: string;
+  currentDisplayString?: string;
+}
+
 interface AirtableActivityInfo {
   createdTime?: string;
   originatingUserId?: string;
   diffRowHtml?: string;
+  deserializedActivityItems?: DeserializedActivityItem[];
   groupType?: string;
 }
 
@@ -69,7 +80,7 @@ export class AirtableRevisionParserService {
     for (const activityId of orderedIds) {
       const activity = activities[activityId];
 
-      if (!activity?.diffRowHtml) {
+      if (!activity) {
         continue;
       }
 
@@ -79,21 +90,38 @@ export class AirtableRevisionParserService {
       const changedAt = activity.createdTime
         ? new Date(activity.createdTime)
         : new Date();
+      const safeChangedAt = Number.isNaN(changedAt.getTime()) ? new Date() : changedAt;
+      const changedBy = {
+        userId: activity.originatingUserId,
+        email: user?.email,
+        name: user?.name,
+      };
 
-      changes.push(
-        ...this.parseDiffRowHtml({
-          diffRowHtml: activity.diffRowHtml,
-          sourceUrl: input.sourceUrl,
-          changedAt: Number.isNaN(changedAt.getTime()) ? new Date() : changedAt,
-          changedBy: {
-            userId: activity.originatingUserId,
-            email: user?.email,
-            name: user?.name,
-          },
-          activityId,
-          groupType: activity.groupType,
-        }),
-      );
+      if (activity.diffRowHtml) {
+        changes.push(
+          ...this.parseDiffRowHtml({
+            diffRowHtml: activity.diffRowHtml,
+            sourceUrl: input.sourceUrl,
+            changedAt: safeChangedAt,
+            changedBy,
+            activityId,
+            groupType: activity.groupType,
+          }),
+        );
+      } else if (activity.deserializedActivityItems?.length) {
+        changes.push(
+          ...this.parseDeserializedItems(
+            activity.deserializedActivityItems,
+            {
+              sourceUrl: input.sourceUrl,
+              changedAt: safeChangedAt,
+              changedBy,
+              activityId,
+              groupType: activity.groupType,
+            },
+          ),
+        );
+      }
     }
 
     return changes.sort((left, right) => left.changedAt.getTime() - right.changedAt.getTime());
@@ -279,6 +307,102 @@ export class AirtableRevisionParserService {
 
   private normalizeWhitespace(value: string | undefined): string {
     return (value ?? '').replace(/\s+/g, ' ').trim();
+  }
+
+  private parseDeserializedItems(
+    items: DeserializedActivityItem[],
+    context: {
+      sourceUrl?: string;
+      changedAt: Date;
+      changedBy: { userId?: string; name?: string; email?: string };
+      activityId?: string;
+      groupType?: string;
+    },
+  ): ParsedRevisionHistoryChange[] {
+    const changes: ParsedRevisionHistoryChange[] = [];
+
+    for (const item of items) {
+      const fieldName = item.columnName ?? item.columnId ?? '';
+
+      if (!fieldName) {
+        continue;
+      }
+
+      const oldValue = this.extractDeserializedValue(
+        item.previousDisplayString,
+        item.previousCellValueObject,
+      );
+      const newValue = this.extractDeserializedValue(
+        item.currentDisplayString,
+        item.currentCellValueObject,
+      );
+
+      if (oldValue === undefined && newValue === undefined) {
+        continue;
+      }
+
+      changes.push({
+        activityId: context.activityId,
+        changeType: this.toSnakeCase(fieldName),
+        columnType: item.columnType ?? this.toSnakeCase(fieldName),
+        fieldName,
+        columnId: item.columnId,
+        groupType: context.groupType,
+        oldValue: oldValue ?? null,
+        newValue: newValue ?? null,
+        changedAt: context.changedAt,
+        changedBy: context.changedBy,
+        sourceUrl: context.sourceUrl,
+      });
+    }
+
+    return changes;
+  }
+
+  private extractDeserializedValue(
+    displayString?: string,
+    cellValueObject?: unknown,
+  ): unknown {
+    if (displayString !== undefined && displayString !== null && displayString !== '') {
+      return displayString;
+    }
+
+    if (cellValueObject === null || cellValueObject === undefined) {
+      return undefined;
+    }
+
+    if (typeof cellValueObject === 'string') {
+      return cellValueObject || undefined;
+    }
+
+    if (typeof cellValueObject === 'number' || typeof cellValueObject === 'boolean') {
+      return cellValueObject;
+    }
+
+    if (Array.isArray(cellValueObject)) {
+      const texts = cellValueObject
+        .map((entry) =>
+          typeof entry === 'string'
+            ? entry
+            : typeof entry === 'object' && entry !== null
+              ? (entry as Record<string, unknown>).name ??
+                (entry as Record<string, unknown>).text ??
+                (entry as Record<string, unknown>).label ??
+                JSON.stringify(entry)
+              : String(entry),
+        )
+        .filter(Boolean);
+
+      return texts.length ? texts.join(', ') : undefined;
+    }
+
+    if (typeof cellValueObject === 'object') {
+      const obj = cellValueObject as Record<string, unknown>;
+
+      return obj.name ?? obj.text ?? obj.label ?? JSON.stringify(obj);
+    }
+
+    return undefined;
   }
 
   private toSnakeCase(value: string): string {

@@ -486,6 +486,13 @@ export class GridService {
         continue;
       }
 
+      // When a specific table is already selected via processedEntity (tableId),
+      // skip the tableName column filter — it would conflict because all records
+      // in that table share the same tableName, and any mismatch returns 0 rows.
+      if (field === 'tableName' && input.query.processedEntity) {
+        continue;
+      }
+
       const filterType = model.filterType ?? this.getFilterTypeForField(field, input.columns);
 
       if (filterType === 'number') {

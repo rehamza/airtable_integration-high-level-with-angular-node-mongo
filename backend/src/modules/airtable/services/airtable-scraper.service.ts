@@ -357,6 +357,10 @@ export class AirtableScraperService {
             } finally {
               recordsProcessed += 1;
               await this.safeUpdateJobProgress(job, recordsProcessed);
+              // Rate-limit: wait between records to respect Airtable limits
+              if (queue.length) {
+                await this.sleep(this.getInterRequestDelayMs());
+              }
             }
           }
         }),
@@ -399,24 +403,12 @@ export class AirtableScraperService {
     integration: IntegrationDocument,
     dto: AirtableRevisionHistorySyncDto,
   ): Promise<RecordTarget[]> {
-    const filters: Record<string, unknown> = {
+    const baseFilter: Record<string, unknown> = {
       integrationId: integration._id,
     };
 
     if (dto.baseId) {
-      filters.baseId = dto.baseId;
-    }
-
-    if (dto.tableId) {
-      filters.tableId = dto.tableId;
-    }
-
-    if (dto.recordId) {
-      filters.recordId = dto.recordId;
-    } else if (dto.recordIds?.length) {
-      filters.recordId = {
-        $in: dto.recordIds,
-      };
+      baseFilter.baseId = dto.baseId;
     }
 
     const limit = dto.limit ?? this.getDefaultRevisionLimit();
@@ -429,18 +421,80 @@ export class AirtableScraperService {
         limit,
       })}`,
     );
-    const pages = await this.airtablePageModel
-      .find(filters)
-      .sort({ updatedAt: -1, createdAt: -1 })
-      .limit(limit)
-      .select({ baseId: 1, tableId: 1, recordId: 1 })
-      .exec();
 
-    return pages.map((page) => ({
-      baseId: page.baseId,
-      tableId: page.tableId,
-      recordId: page.recordId,
-    }));
+    // Specific record(s) or single table requested — simple flat query
+    if (dto.recordId || dto.recordIds?.length || dto.tableId) {
+      const filters = { ...baseFilter };
+
+      if (dto.tableId) {
+        filters.tableId = dto.tableId;
+      }
+
+      if (dto.recordId) {
+        filters.recordId = dto.recordId;
+      } else if (dto.recordIds?.length) {
+        filters.recordId = { $in: dto.recordIds };
+      }
+
+      const pages = await this.airtablePageModel
+        .find(filters)
+        .sort({ updatedAt: -1 })
+        .limit(limit)
+        .select({ baseId: 1, tableId: 1, recordId: 1 })
+        .lean()
+        .exec();
+
+      return pages.map((page) => ({
+        baseId: page.baseId,
+        tableId: page.tableId,
+        recordId: page.recordId,
+      }));
+    }
+
+    // No table filter — distribute the limit proportionally across every table
+    // so all tables get scraped, not just the most recently-synced ones.
+    const distinctTableIds = await this.airtablePageModel
+      .distinct('tableId', baseFilter)
+      .exec() as string[];
+
+    this.logger.debug(
+      `Found ${distinctTableIds.length} distinct table(s) to distribute limit=${limit} across for integration="${integration.integrationKey}"`,
+    );
+
+    if (!distinctTableIds.length) {
+      return [];
+    }
+
+    const perTableLimit = Math.max(Math.ceil(limit / distinctTableIds.length), 1);
+    const allRecords: RecordTarget[] = [];
+
+    for (const tableId of distinctTableIds) {
+      if (allRecords.length >= limit) {
+        break;
+      }
+
+      const pages = await this.airtablePageModel
+        .find({ ...baseFilter, tableId })
+        .sort({ updatedAt: -1 })
+        .limit(perTableLimit)
+        .select({ baseId: 1, tableId: 1, recordId: 1 })
+        .lean()
+        .exec();
+
+      this.logger.debug(
+        `Table ${tableId}: loaded ${pages.length} record(s) (perTableLimit=${perTableLimit})`,
+      );
+
+      for (const page of pages) {
+        allRecords.push({
+          baseId: page.baseId,
+          tableId: page.tableId,
+          recordId: page.recordId,
+        });
+      }
+    }
+
+    return allRecords.slice(0, limit);
   }
 
   private async findFirstStoredRecord(
@@ -579,7 +633,7 @@ export class AirtableScraperService {
       page.setDefaultNavigationTimeout(this.getNavigationTimeoutMs());
       await page.setViewport({ width: 1440, height: 1024 });
       await page.setUserAgent(
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36',
       );
 
       await page.goto(loginUrl, {
@@ -980,18 +1034,31 @@ export class AirtableScraperService {
         );
       }
 
-      let payload: Record<string, unknown>;
+      let rawPayload: Record<string, unknown>;
 
       try {
-        payload = JSON.parse(body) as Record<string, unknown>;
+        rawPayload = JSON.parse(body) as Record<string, unknown>;
       } catch (error) {
         throw new ServiceUnavailableException(
           `Airtable row activity endpoint returned invalid JSON: ${error instanceof Error ? error.message : 'unknown parse failure'}`,
         );
       }
 
+      // Airtable wraps the response in { msg: "SUCCESS", data: { ... } } — unwrap if present
+      const payload =
+        typeof rawPayload.data === 'object' && rawPayload.data !== null
+          ? (rawPayload.data as Record<string, unknown>)
+          : rawPayload;
+
       const orderedIds =
         (payload.orderedActivityAndCommentIds as string[] | undefined) ?? [];
+      const activityInfoById =
+        (payload.rowActivityInfoById as Record<string, Record<string, unknown>> | undefined) ?? {};
+      this.logger.debug(
+        `Row activity page for recordId=${record.recordId}: orderedIds=${orderedIds.length} activityKeys=${Object.keys(activityInfoById).length} topKeys=${JSON.stringify(Object.keys(rawPayload))} dataKeys=${JSON.stringify(Object.keys(payload))} sampleActivityKeys=${JSON.stringify(
+          Object.keys(Object.values(activityInfoById)[0] ?? {}),
+        )}`,
+      );
       (aggregated.orderedActivityAndCommentIds as string[]).push(...orderedIds);
       Object.assign(
         aggregated.rowActivityOrCommentUserObjById as Record<string, unknown>,
@@ -999,7 +1066,7 @@ export class AirtableScraperService {
       );
       Object.assign(
         aggregated.rowActivityInfoById as Record<string, unknown>,
-        (payload.rowActivityInfoById as Record<string, unknown> | undefined) ?? {},
+        activityInfoById,
       );
       aggregated.notificationLevel = payload.notificationLevel;
       aggregated.isRevisionHistoryDisabled = payload.isRevisionHistoryDisabled ?? false;
@@ -1008,6 +1075,11 @@ export class AirtableScraperService {
           ? payload.offsetV2
           : null;
       aggregated.offsetV2 = offsetV2;
+
+      // Rate-limit: wait between paginated requests to respect Airtable limits
+      if (offsetV2) {
+        await this.sleep(this.getInterRequestDelayMs());
+      }
     } while (offsetV2);
 
     return aggregated;
@@ -1167,7 +1239,7 @@ export class AirtableScraperService {
     const params = {
       limit: envNumber(
         this.configService.get<string>('AIRTABLE_REVISION_HISTORY_PAGE_SIZE'),
-        50,
+        10,
       ),
       offsetV2,
       shouldReturnDeserializedActivityItems: true,
@@ -1192,6 +1264,8 @@ export class AirtableScraperService {
       'X-Requested-With': 'XMLHttpRequest',
       'X-Airtable-Application-Id': record.baseId,
       'X-Airtable-Inter-Service-Client': 'webClient',
+      'X-Airtable-Page-Load-Id': `pgl${randomBytes(8).toString('hex')}`,
+      'X-Airtable-Client-Queue-Time': '1',
       'X-User-Locale': this.configService.get<string>('SCRAPER_USER_LOCALE') ?? 'en',
       'X-Time-Zone': this.configService.get<string>('SCRAPER_TIME_ZONE') ?? 'Asia/Karachi',
     };
@@ -1246,12 +1320,26 @@ export class AirtableScraperService {
         await this.tryOpenRevisionHistoryInBrowser(page);
         const expandedHtml = await page.content().catch(() => '');
 
-        if (expandedHtml && /revision history|all activity|comments|status|assignee|assigned/i.test(expandedHtml)) {
+        // Check for revision history content indicators
+        const hasHistoryContent =
+          expandedHtml &&
+          (/historicalCellContainer/i.test(expandedHtml) ||
+            /diffRowHtml/i.test(expandedHtml) ||
+            /revision\s*history/i.test(expandedHtml) ||
+            /edited\s*(this\s*record|using)/i.test(expandedHtml) ||
+            (/activityFeed/i.test(expandedHtml) &&
+              (expandedHtml.length > 10_000)));
+
+        if (hasHistoryContent) {
           this.logger.debug(
             `Browser fallback captured page HTML for recordId=${record.recordId} url="${candidateUrl}" htmlLength=${expandedHtml.length}`,
           );
           return expandedHtml;
         }
+
+        this.logger.debug(
+          `Browser fallback: no revision history indicators found for recordId=${record.recordId} url="${candidateUrl}" htmlLength=${expandedHtml?.length ?? 0}`,
+        );
       }
 
       throw new ServiceUnavailableException(
@@ -1388,24 +1476,99 @@ export class AirtableScraperService {
   }
 
   private async tryOpenRevisionHistoryInBrowser(page: Page): Promise<void> {
-    const buttonLabels = [
-      'see revision history',
-      'revision history',
-      'all activity',
-      'comments',
-    ];
+    // Step 1: Wait for the record detail / expanded row to load
+    await this.sleep(2000);
 
-    for (const label of buttonLabels) {
-      const clicked = await this.clickButtonByText(page, [label]);
-
-      if (clicked) {
-        await page.waitForNetworkIdle({
-          idleTime: 500,
-          timeout: this.getNavigationTimeoutMs(),
-        }).catch(() => undefined);
-        await this.sleep(750);
+    // Step 2: Try to click the expand icon on the first row if the record modal isn't open yet
+    const expandClicked = await page.evaluate(() => {
+      const expandIcon = document.querySelector(
+        '.expandRow, [data-testid="expand-row"], .cellContainer .flex-auto svg, .rowExpander',
+      ) as HTMLElement | null;
+      if (expandIcon) {
+        expandIcon.click();
+        return true;
       }
+      return false;
+    }).catch(() => false);
+
+    if (expandClicked) {
+      await this.sleep(2000);
     }
+
+    // Step 3: Look for the activity/revision history panel or the dropdown to switch to it
+    // Airtable's record detail has a right-side panel with a dropdown selector
+    // The dropdown options include: "All activity", "Comments", "Revision history"
+    const switchedToHistory = await page.evaluate(() => {
+      // Try clicking any element that contains "Revision history" text
+      const allElements = Array.from(document.querySelectorAll(
+        'button, [role="button"], [role="menuitem"], [role="option"], [role="menuitemradio"],' +
+        ' [role="listbox"] *, select option, .truncate, span, div[class*="option"],' +
+        ' div[class*="menu"], div[class*="dropdown"], li, a',
+      )) as HTMLElement[];
+
+      for (const el of allElements) {
+        const text = (el.textContent ?? '').trim().toLowerCase();
+        if (text === 'revision history' || text === 'see revision history') {
+          el.click();
+          return 'clicked-revision-history';
+        }
+      }
+
+      // Try opening a dropdown first if "Revision history" wasn't directly visible
+      const dropdownTriggers = Array.from(document.querySelectorAll(
+        '[role="combobox"], [aria-haspopup="listbox"], [aria-haspopup="true"],' +
+        ' [data-testid*="activity"], [class*="activityFeed"] select,' +
+        ' [class*="activityFeed"] [role="button"], [class*="dropdown"] button,' +
+        ' button[aria-expanded]',
+      )) as HTMLElement[];
+
+      for (const trigger of dropdownTriggers) {
+        trigger.click();
+        return 'opened-dropdown';
+      }
+
+      return 'none';
+    }).catch(() => 'error');
+
+    this.logger.debug(`tryOpenRevisionHistoryInBrowser: switchedToHistory="${switchedToHistory}"`);
+
+    if (switchedToHistory === 'opened-dropdown') {
+      // Wait for dropdown menu to render, then select "Revision history"
+      await this.sleep(800);
+      await page.evaluate(() => {
+        const menuItems = Array.from(document.querySelectorAll(
+          '[role="menuitem"], [role="option"], [role="menuitemradio"],' +
+          ' li, [class*="option"], [class*="menuItem"]',
+        )) as HTMLElement[];
+        for (const item of menuItems) {
+          const text = (item.textContent ?? '').trim().toLowerCase();
+          if (text === 'revision history' || text.includes('revision history')) {
+            item.click();
+            return true;
+          }
+        }
+        return false;
+      }).catch(() => false);
+    }
+
+    // Step 4: Wait for the revision history data to load
+    await page.waitForNetworkIdle({
+      idleTime: 1000,
+      timeout: this.getNavigationTimeoutMs(),
+    }).catch(() => undefined);
+    await this.sleep(1500);
+
+    // Step 5: Scroll the history panel to trigger loading of all entries
+    await page.evaluate(() => {
+      const historyContainers = Array.from(document.querySelectorAll(
+        '[class*="activityFeed"], [class*="revisionHistory"], [class*="history"],' +
+        ' [class*="activity"], [data-testid*="activity"]',
+      ));
+      for (const container of historyContainers) {
+        container.scrollTop = container.scrollHeight;
+      }
+    }).catch(() => undefined);
+    await this.sleep(1000);
   }
 
   private buildCookieHeader(cookies: BrowserCookie[]): string {
@@ -1466,8 +1629,8 @@ export class AirtableScraperService {
     return (
       status === 401 ||
       status === 403 ||
-      [302, 303, 307, 308].includes(status) ||
-      Boolean(locationHeader && /login/i.test(locationHeader)) ||
+      ([302, 303, 307, 308].includes(status) &&
+        Boolean(locationHeader && /(login|sign[_-]?in|auth|sso)/i.test(locationHeader))) ||
       loginFormPatterns.some((pattern) => pattern.test(body))
     );
   }
@@ -1698,7 +1861,7 @@ export class AirtableScraperService {
   private getBrowserUserAgent(): string {
     return (
       this.configService.get<string>('SCRAPER_USER_AGENT') ??
-      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36'
     );
   }
 
@@ -1732,6 +1895,13 @@ export class AirtableScraperService {
 
   private getDefaultIntegrationKey(): string {
     return this.configService.get<string>('AIRTABLE_DEFAULT_INTEGRATION_KEY') ?? 'default';
+  }
+
+  private getInterRequestDelayMs(): number {
+    return envNumber(
+      this.configService.get<string>('SCRAPER_INTER_REQUEST_DELAY_MS'),
+      300,
+    );
   }
 
   private getRetryDelayMs(attempt: number): number {
